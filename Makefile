@@ -5,7 +5,7 @@ include $(SRCDIR)/makefiles/platform/*.mk
 all: libfpp-LoRa.$(SHLIB_EXT)
 
 OBJECTS_fpp_LoRa_so += src/FPPLoRa.o
-LIBS_fpp_LoRa_so += -L$(SRCDIR) -lfpp -ljsoncpp -lhttpserver
+LIBS_fpp_LoRa_so += -L$(SRCDIR) -lfpp -ljsoncpp
 CXXFLAGS_src/FPPLoRa.o += -I$(SRCDIR)
 
 %.o: %.cpp Makefile

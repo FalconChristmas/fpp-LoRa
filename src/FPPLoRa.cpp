@@ -11,7 +11,10 @@
 #include <chrono>
 #include <thread>
 
-#include <httpserver.hpp>
+// HttpAppFramework.h must come before fpphttp.h: fpphttp.h undefines the
+// trantor LOG_* macros, but drogon's own headers need them while compiling.
+#include <drogon/HttpAppFramework.h>
+#include "fpphttp.h"
 #include "common.h"
 #include "settings.h"
 #include "MultiSync.h"
@@ -37,7 +40,7 @@ enum {
     BLANK             = 9
 };
 
-class LoRaMultiSyncPlugin : public MultiSyncPlugin, public httpserver::http_resource  {
+class LoRaMultiSyncPlugin : public MultiSyncPlugin {
 public:
     
     LoRaMultiSyncPlugin() {}
@@ -237,15 +240,19 @@ public:
         return total;
     }
 
-    virtual HTTP_RESPONSE_CONST std::shared_ptr<httpserver::http_response> render_POST(const httpserver::http_request &req) override {
+    // Drogon handler for the "/LoRa" route (reached via the web UI's POST to
+    // api/plugin-apis/LoRa, which Apache proxies to localhost:32322/LoRa).
+    // Reconfigures the attached LoRa module from the posted JSON settings.
+    void handleConfigRequest(const drogon::HttpRequestPtr &req,
+                             std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
         bool reopen = false;
         if (devFile >= 0) {
             SerialClose(devFile);
             devFile = -1;
             reopen = true;
-        }        
+        }
         Json::Value json;
-        std::string content(req.get_content());
+        std::string content(req->body());
         LoadJsonFromString(content, json);
         std::string modType = json["LoRaDeviceType"].asString();
 
@@ -258,49 +265,51 @@ public:
             int TXP = json["TXP"].asInt();
             float CH = json["CH"].asFloat();
 
-            
             std::string devFileName = "/dev/" + device;
             int sdevFile = SerialOpen(devFileName.c_str(), 9600, "8N1", true);
+            if (sdevFile < 0) {
+                LogWarn(VB_PLUGIN, "Could not open %s to configure LoRa module\n", devFileName.c_str());
+            } else {
+                char buf[256];
+                memset(buf, 0, sizeof(buf));
+                int packetLen;
+                setupQuery(buf, modType, packetLen);
+                int w = sendCommand(sdevFile, buf, 3, packetLen);
+                printBuf(buf, "C1", w);
 
-            char buf[256];
-            memset(buf, 0, sizeof(buf));
-            int packetLen;
-            setupQuery(buf, modType, packetLen);        
-            int w = sendCommand(sdevFile, buf, 3, packetLen);
-            printBuf(buf, "C1", w);
-
-            setupPacket(buf, modType);
-            addMA(MA, buf, modType);
-            addUBR(UBR, buf, modType);
-            addADR(ADR, buf, modType);
-            addCH(CH, buf, modType);
-            addFLAGS(FEC, TXP, buf, modType);
-            printBuf(buf, "C0S", packetLen);
-            w = sendCommand(sdevFile, buf, packetLen, packetLen);
-            printBuf(buf, "C0E", w);
-            if (w == 0) {
+                setupPacket(buf, modType);
+                addMA(MA, buf, modType);
+                addUBR(UBR, buf, modType);
+                addADR(ADR, buf, modType);
+                addCH(CH, buf, modType);
+                addFLAGS(FEC, TXP, buf, modType);
+                printBuf(buf, "C0S", packetLen);
                 w = sendCommand(sdevFile, buf, packetLen, packetLen);
-                printBuf(buf, "C0E", w);    
-            }
-            
-            memset(buf, 0, sizeof(buf));
-            setupQuery(buf, modType, packetLen);        
-            w = sendCommand(sdevFile, buf, 3, packetLen);
-            printBuf(buf, "C1E", w);
+                printBuf(buf, "C0E", w);
+                if (w == 0) {
+                    w = sendCommand(sdevFile, buf, packetLen, packetLen);
+                    printBuf(buf, "C0E", w);
+                }
 
-            SerialClose(sdevFile);
-            LogInfo(VB_PLUGIN, "LoRa Module Configured\n", devFileName.c_str());
+                memset(buf, 0, sizeof(buf));
+                setupQuery(buf, modType, packetLen);
+                w = sendCommand(sdevFile, buf, 3, packetLen);
+                printBuf(buf, "C1E", w);
+
+                SerialClose(sdevFile);
+                LogInfo(VB_PLUGIN, "LoRa Module Configured: %s\n", devFileName.c_str());
+            }
         }
         loadSettings();
         if (reopen) {
             Init();
         }
-        
-#if FPP_MAJOR_VERSION >= 4
-        return std::shared_ptr<httpserver::http_response>(new httpserver::string_response("OK", 200));
-#else
-        return httpserver::http_response_builder("OK", 200);
-#endif
+
+        auto resp = drogon::HttpResponse::newHttpResponse();
+        resp->setStatusCode(drogon::k200OK);
+        resp->setContentTypeString("text/plain");
+        resp->setBody("OK");
+        callback(resp);
     }
     void writeWS(const char *buf, bool resp = true) {
         if (devFile >= 0) {
@@ -726,7 +735,7 @@ public:
         plugin = nullptr;
     }
     
-    virtual void registerApis(httpserver::webserver *m_ws) override {
+    virtual void registerApis() override {
         //at this point, most of FPP is up and running, we can register our MultiSync plugin
         if (enabled && plugin->Init()) {
             if (getFPPmode() == PLAYER_MODE) {
@@ -736,11 +745,22 @@ public:
         } else {
             enabled = false;
         }
-        m_ws->register_resource("/LoRa", plugin, true);
-        
+        // registerApis() runs before drogon's app().run(), so the "/LoRa" route
+        // is in place before the server starts. The lambda is copyable, so no
+        // shared_ptr wrapper is needed. FPP joins the drogon worker thread
+        // before unloading this plugin, so capturing the plugin pointer is safe.
+        LoRaMultiSyncPlugin *p = plugin;
+        drogon::app().registerHandler("/LoRa",
+            [p](const drogon::HttpRequestPtr &req,
+                std::function<void(const drogon::HttpResponsePtr &)> &&cb) {
+                p->handleConfigRequest(req, std::move(cb));
+            },
+            { drogon::Post });
     }
-    virtual void unregisterApis(httpserver::webserver* m_ws) override {
-        m_ws->unregister_resource("/LoRa");
+    virtual void unregisterApis() override {
+        // Drogon has no route-removal API, but FPP joins the drogon worker
+        // thread before this plugin is unloaded, so the "/LoRa" handler will
+        // not be invoked after this point.
         if (enabled) {
             plugin->ShutdownSync();
             multiSync->removeMultiSyncPlugin(plugin);
