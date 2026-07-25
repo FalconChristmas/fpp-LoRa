@@ -6,6 +6,7 @@
     "homeURL": "https://github.com/FalconChristmas/fpp-LoRa",
     "srcURL": "https://github.com/FalconChristmas/fpp-LoRa.git",
     "bugURL": "https://github.com/FalconChristmas/fpp-LoRa/issues",
+    "iconURL": "https://raw.githubusercontent.com/FalconChristmas/fpp-LoRa/master/icon.png",
     "allowUpdates": 1,
     "versions": [
         {
