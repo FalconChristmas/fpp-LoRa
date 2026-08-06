@@ -235,14 +235,14 @@ Port:  <? PrintSettingSelect("Port", "LoRaDevicePort", 1, 0, 'ttyUSB0', $LoRaPor
 &nbsp; Baud Rate: <? PrintSettingSelect("Speed", "LoRaDeviceSpeed", 1, 0, '9600', $LoRaSpeeds, "fpp-LoRa") ?>
 <p>
     <? if ($settings['fppMode'] == "player") { ?>
-Send media sync packets: <? PrintSettingCheckbox("Enable LoRa Media", "LoRaMediaEnable", 1, 0, "1", "0", "fpp-LoRa", "", "1");  ?>
+Send media sync packets: <? PrintSettingCheckbox("Enable LoRa Media", "LoRaMediaEnable", 0, 0, "1", "0", "fpp-LoRa", "", "1");  ?>
 <p>
 The LoRa protocol is very slow, it defaults to 2400 baud over the air.   At the start of each sequence, we have to send the
 filenames for the sequence and the media which can take significant time if the filenames are long.  If you know the remotes will not 
 need the media filenames, turn off sending the media sync packets which will help the remotes start quicker.
 <p>
     <? } else { ?>
-Bridge to local network: <? PrintSettingCheckbox("Enable LoRa Bridge", "LoRaBridgeEnable", 1, 0, "1", "0", "fpp-LoRa"); ?>
+Bridge to local network: <? PrintSettingCheckbox("Enable LoRa Bridge", "LoRaBridgeEnable", 0, 0, "1", "0", "fpp-LoRa"); ?>
 <p>
 Bridging to the local network will re-send the sync packets out on the local network so other FPP devices on the network can
 be synced.   This remote must have it's MultiSync targets set while in Master mode once before being placed back

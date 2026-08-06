@@ -732,7 +732,7 @@ public:
     // use the directory name - so this plugin could not be found to be unloaded.
     // It also lines the inherited settings map up with the file loadSettings()
     // actually reads, config/plugin.fpp-LoRa.
-    LoRaFPPPlugin() : FPPPlugins::Plugin("fpp-LoRa"), FPPPlugins::APIProviderPlugin() {
+    LoRaFPPPlugin() : FPPPlugins::Plugin("fpp-LoRa", true), FPPPlugins::APIProviderPlugin() {
         enabled = plugin->loadSettings();
     }
     virtual ~LoRaFPPPlugin() {
@@ -740,6 +740,33 @@ public:
         plugin = nullptr;
     }
     
+    // Called by FPP when config/plugin.fpp-LoRa changes.
+    //
+    // Only the two flags below can be applied where they stand. The rest -
+    // enabling the plugin, and the serial port and its speed - decide which
+    // device is open and whether its descriptor is in the epoll loop, and that
+    // descriptor was handed to FPP through addControlCallbacks(); swapping it
+    // underneath FPP is not something this plugin can do safely, so those still
+    // want a restart and their settings still say so.
+    //
+    // The radio parameters (module type, air rate, power, channel, FEC, UART
+    // rate) are not here on purpose: they are programmed into the module by the
+    // UI posting to the /LoRa route, which is why they never needed a restart.
+    virtual void settingChanged(const std::string &key, const std::string &value) override {
+        if (key == "LoRaMediaEnable") {
+            plugin->sendMediaSync = (value == "1");
+            LogInfo(VB_PLUGIN, "LoRa: media sync %s\n", plugin->sendMediaSync ? "enabled" : "disabled");
+        } else if (key == "LoRaBridgeEnable") {
+            plugin->bridgeToLocal = (value == "1");
+            LogInfo(VB_PLUGIN, "LoRa: local bridging %s\n", plugin->bridgeToLocal ? "enabled" : "disabled");
+            if (plugin->bridgeToLocal) {
+                // Needed to forward what arrives over the radio; opening them
+                // again when they already are is harmless.
+                multiSync->OpenControlSockets();
+            }
+        }
+    }
+
     virtual void registerApis() override {
         //at this point, most of FPP is up and running, we can register our MultiSync plugin
         if (enabled && plugin->Init()) {
