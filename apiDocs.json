@@ -1,0 +1,59 @@
+{
+    "paths": {
+        "/LoRa": {
+            "post": {
+                "summary": "Program the LoRa radio module",
+                "description": "Writes the radio configuration to the attached module over its serial port. Sent by the plugin's configuration page when the settings are submitted; the values are programmed into the module itself rather than stored as FPP settings, which is why they take effect without restarting.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "LoRaDeviceType": {
+                                        "type": "string",
+                                        "description": "Module model, e.g. E22-900T22U"
+                                    },
+                                    "LoRaDevicePort": {
+                                        "type": "string",
+                                        "description": "Serial device name under /dev"
+                                    },
+                                    "MA": {
+                                        "type": "integer",
+                                        "description": "Module address"
+                                    },
+                                    "UBR": {
+                                        "type": "integer",
+                                        "description": "UART baud rate"
+                                    },
+                                    "ADR": {
+                                        "type": "integer",
+                                        "description": "Air data rate"
+                                    },
+                                    "FEC": {
+                                        "type": "integer",
+                                        "description": "Forward error correction, 0 or 1"
+                                    },
+                                    "TXP": {
+                                        "type": "integer",
+                                        "description": "Transmit power level"
+                                    },
+                                    "CH": {
+                                        "type": "number",
+                                        "description": "Channel/frequency in MHz"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The module was reprogrammed"
+                    }
+                }
+            }
+        }
+    }
+}
