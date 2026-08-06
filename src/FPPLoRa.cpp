@@ -13,7 +13,6 @@
 
 // HttpAppFramework.h must come before fpphttp.h: fpphttp.h undefines the
 // trantor LOG_* macros, but drogon's own headers need them while compiling.
-#include <drogon/HttpAppFramework.h>
 #include "fpphttp.h"
 #include "common.h"
 #include "settings.h"
@@ -727,7 +726,13 @@ public:
     LoRaMultiSyncPlugin *plugin = new LoRaMultiSyncPlugin();
     bool enabled = false;
     
-    LoRaFPPPlugin() : FPPPlugins::Plugin("LoRa"), FPPPlugins::APIProviderPlugin() {
+    // Name matches the directory the plugin installs into. It used to be
+    // "LoRa", which is what everything inside fppd keyed on while the Plugin
+    // Manager, the install/uninstall scripts and the load/unload endpoints all
+    // use the directory name - so this plugin could not be found to be unloaded.
+    // It also lines the inherited settings map up with the file loadSettings()
+    // actually reads, config/plugin.fpp-LoRa.
+    LoRaFPPPlugin() : FPPPlugins::Plugin("fpp-LoRa"), FPPPlugins::APIProviderPlugin() {
         enabled = plugin->loadSettings();
     }
     virtual ~LoRaFPPPlugin() {
@@ -745,26 +750,39 @@ public:
         } else {
             enabled = false;
         }
-        // registerApis() runs before drogon's app().run(), so the "/LoRa" route
-        // is in place before the server starts. The lambda is copyable, so no
-        // shared_ptr wrapper is needed. FPP joins the drogon worker thread
-        // before unloading this plugin, so capturing the plugin pointer is safe.
+        // Registered through FPP rather than drogon::app() directly: drogon has
+        // no route removal, so a handler registered straight with it could never
+        // be withdrawn - it would pin this plugin in memory for the life of
+        // fppd, and a rebuilt copy could never take the path back over.
+        // Capturing the plugin pointer is safe because unregisterPluginApi()
+        // does not return until no request is inside the handler AND the
+        // handler has been destroyed.
         LoRaMultiSyncPlugin *p = plugin;
-        drogon::app().registerHandler("/LoRa",
-            [p](const drogon::HttpRequestPtr &req,
-                std::function<void(const drogon::HttpResponsePtr &)> &&cb) {
+        FPPPlugins::registerPluginApi("/LoRa",
+            [p](const HttpRequestPtr &req, HttpCallback &&cb) {
                 p->handleConfigRequest(req, std::move(cb));
             },
             { drogon::Post });
     }
     virtual void unregisterApis() override {
-        // Drogon has no route-removal API, but FPP joins the drogon worker
-        // thread before this plugin is unloaded, so the "/LoRa" handler will
-        // not be invoked after this point.
+        // Disarms the route and destroys the handler before returning; after
+        // this the path answers 410 rather than dispatching into this library.
+        FPPPlugins::unregisterPluginApi("/LoRa");
+    }
+
+    // Teardown belongs here rather than in unregisterApis(): FPP calls this once
+    // the route is disarmed and while the plugin is still whole. The MultiSync
+    // registration is the one that matters - its callbacks run from the
+    // sequence/media path, so leaving it in place while the object is destroyed
+    // is a call into a half-destroyed plugin. Nothing is asynchronous, so no
+    // readiness predicate is needed; the serial port is closed by
+    // ~LoRaMultiSyncPlugin() in the destructor below.
+    virtual std::function<bool()> shutdown() override {
         if (enabled) {
             plugin->ShutdownSync();
             multiSync->removeMultiSyncPlugin(plugin);
         }
+        return nullptr;
     }
 
     virtual void addControlCallbacks(std::map<int, std::function<bool(int)>> &callbacks) override {
@@ -778,6 +796,13 @@ public:
     }
 };
 
+
+// Safe to dlclose() on unload: no threads of its own, no timers, no CurlManager
+// requests, no commands and no drogon client objects. The route goes through
+// registerPluginApi() and comes back in unregisterApis(); shutdown() withdraws
+// the MultiSync registration; FPP takes the serial descriptor out of its epoll
+// loop, and ~LoRaMultiSyncPlugin() closes it before the library is unmapped.
+FPP_PLUGIN_SUPPORTS_UNLOAD()
 
 extern "C" {
     FPPPlugins::Plugin *createPlugin() {
