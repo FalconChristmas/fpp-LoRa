@@ -35,9 +35,27 @@ enum {
     STOP_SEQUENCE     = 5,
     STOP_MEDIA        = 6,
     SYNC              = 7,
-    
+
     BLANK             = 9
 };
+
+// The port name comes out of the plugin's settings, which the API lets a client
+// write, so it isn't necessarily the bare device name the UI dropdown offers.
+// Only accept the serial devices content.php actually lists - that keeps a value
+// like "../../etc/passwd" from turning "/dev/" + device into an arbitrary path.
+static bool isAllowedSerialPort(const std::string &device) {
+    static const char * const PREFIXES[] = {"ttyUSB", "ttyACM", "ttyAMA", "ttyS", "ttyO"};
+    for (const char *prefix : PREFIXES) {
+        size_t plen = strlen(prefix);
+        if (device.compare(0, plen, prefix) == 0
+            && device.length() > plen
+            && device.find_first_not_of("0123456789", plen) == std::string::npos) {
+            return true;
+        }
+    }
+    LogWarn(VB_PLUGIN, "LoRa: refusing to use '%s' - not a recognized serial port name\n", device.c_str());
+    return false;
+}
 
 class LoRaMultiSyncPlugin : public MultiSyncPlugin {
 public:
@@ -265,7 +283,9 @@ public:
             float CH = json["CH"].asFloat();
 
             std::string devFileName = "/dev/" + device;
-            int sdevFile = SerialOpen(devFileName.c_str(), 9600, "8N1", true);
+            int sdevFile = isAllowedSerialPort(device)
+                ? SerialOpen(devFileName.c_str(), 9600, "8N1", true)
+                : -1;
             if (sdevFile < 0) {
                 LogWarn(VB_PLUGIN, "Could not open %s to configure LoRa module\n", devFileName.c_str());
             } else {
@@ -368,6 +388,9 @@ public:
     }
 
     bool Init() {
+        if (!isAllowedSerialPort(device)) {
+            return false;
+        }
         std::string devFileName = "/dev/" + device;
         devFile = SerialOpen(devFileName.c_str(), baud, "8N1", getFPPmode() != REMOTE_MODE);
         if (devFile < 0) {
@@ -395,7 +418,25 @@ public:
             tcdrain(devFile);
         }
     }
-    
+
+    // A name packet is one type byte, the name, then a null terminator, so the
+    // name itself has to fit in sizeof(buf) - 2.  Truncate an over-long name
+    // instead of running off the end of the stack buffer - the remote just ends
+    // up with a shortened name, which is far better than corrupting our stack.
+    void sendNamePacket(char type, const std::string &filename) {
+        char buf[256];
+        size_t len = filename.length();
+        if (len > sizeof(buf) - 2) {
+            len = sizeof(buf) - 2;
+            LogWarn(VB_SYNC, "LoRa: name '%s' too long for a sync packet, truncating to %d chars\n",
+                    filename.c_str(), (int)len);
+        }
+        buf[0] = type;
+        memcpy(&buf[1], filename.c_str(), len);
+        buf[len + 1] = 0;
+        send(buf, len + 2);
+    }
+
     void SendSync(uint32_t frames, float seconds) {
         int diff = frames - lastSentFrame;
         float diffT = seconds - lastSentTime;
@@ -427,10 +468,7 @@ public:
     }
 
     virtual void SendSeqOpenPacket(const std::string &filename) override {
-        char buf[256];
-        strcpy(&buf[1], filename.c_str());
-        buf[0] = SET_SEQUENCE_NAME;
-        send(buf, filename.length() + 2);
+        sendNamePacket(SET_SEQUENCE_NAME, filename);
         lastSequence = filename;
         lastFrame = -1;
         lastSentTime = -1.0f;
@@ -465,10 +503,7 @@ public:
     
     virtual void SendMediaOpenPacket(const std::string &filename) override {
         if (sendMediaSync) {
-            char buf[256];
-            strcpy(&buf[1], filename.c_str());
-            buf[0] = SET_MEDIA_NAME;
-            send(buf, filename.length() + 2);
+            sendNamePacket(SET_MEDIA_NAME, filename);
             lastMedia = filename;
             lastFrame = -1;
             lastSentTime = -1.0f;
