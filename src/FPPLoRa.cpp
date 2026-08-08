@@ -282,13 +282,22 @@ public:
             int TXP = json["TXP"].asInt();
             float CH = json["CH"].asFloat();
 
-            std::string devFileName = "/dev/" + device;
-            int sdevFile = isAllowedSerialPort(device)
-                ? SerialOpen(devFileName.c_str(), 9600, "8N1", true)
-                : -1;
-            if (sdevFile < 0) {
-                LogWarn(VB_PLUGIN, "Could not open %s to configure LoRa module\n", devFileName.c_str());
-            } else {
+            // Validate before building the path, not after - nothing should
+            // construct a /dev path out of an unchecked request value.  Only
+            // ttyUSB/ttyACM/ttyAMA/ttyS/ttyO names are accepted; see
+            // isAllowedSerialPort() above.  Note we can't early-return here:
+            // this is a drogon handler and the response callback at the end of
+            // the function still has to run.
+            std::string devFileName;
+            int sdevFile = -1;
+            if (isAllowedSerialPort(device)) {
+                devFileName = "/dev/" + device;
+                sdevFile = SerialOpen(devFileName.c_str(), 9600, "8N1", true);
+                if (sdevFile < 0) {
+                    LogWarn(VB_PLUGIN, "Could not open %s to configure LoRa module\n", devFileName.c_str());
+                }
+            }
+            if (sdevFile >= 0) {
                 char buf[256];
                 memset(buf, 0, sizeof(buf));
                 int packetLen;
@@ -388,6 +397,8 @@ public:
     }
 
     bool Init() {
+        // Only ttyUSB/ttyACM/ttyAMA/ttyS/ttyO names are accepted here; see
+        // isAllowedSerialPort() above.  Checked before the path is built.
         if (!isAllowedSerialPort(device)) {
             return false;
         }
