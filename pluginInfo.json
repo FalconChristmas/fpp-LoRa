@@ -37,5 +37,28 @@
             "sha": "",
             "dependencies": {}
         }
-    ]
+    ],
+    "privacy": {
+        "summary": "Sends sequence and media file names and timing over an unencrypted LoRa radio link that anyone in range can hear, and can pass them on to the FPP players on your network.",
+        "sends": [
+            {
+                "to": "http://anyone in LoRa radio range",
+                "what": "sequence and media file names, start/stop and timing sync packets",
+                "why": "so remote FPP players beyond Wi-Fi range play in step with this one",
+                "alwaysOn": false
+            },
+            {
+                "to": "http://the FPP players you list as MultiSync remotes",
+                "what": "sequence and media file names and timing sync packets received over the radio",
+                "why": "to pass radio sync on to other FPP players on your local network when bridging is on",
+                "alwaysOn": false
+            }
+        ],
+        "collects": [],
+        "sensors": [],
+        "remoteAccess": "none",
+        "systemChanges": [],
+        "closedCode": false,
+        "other": "In Remote mode any LoRa transmitter on the same channel and address can start, stop and sync this player - and, when bridging is on, the FPP players it forwards to on your network; there is no authentication and radio encryption is turned off. Settings in config/plugin.fpp-LoRa are kept after uninstall. A file name longer than 254 characters is logged as a warning when it is truncated for the radio."
+    }
 }
